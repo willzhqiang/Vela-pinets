@@ -62,6 +62,12 @@ export interface PineToken {
      * DECLARATION — the runtime context is a lossy source for it (see there).
      */
     declaredOverlay?: boolean;
+    /**
+     * `scale` as the declaration states it (`scale.none` / `scale.left` / `scale.right`),
+     * when it is a literal. `none` keeps the script's plots off the price scale — see
+     * {@link pineCtxToModel}.
+     */
+    declaredScale?: string;
 }
 
 /**
@@ -125,7 +131,9 @@ export function preparePine(source: string, instanceId: string, defaultProps?: R
     // Statically detect viewport dependence so the orchestrator can route:
     // viewport-dependent scripts keep the (debounced) full-run path; others stream.
     const reactsToViewport = /chart\.(left|right)_visible_bar(_time)?\b/.test(source);
-    const token: PineToken = { source, instanceId, ...(declaredOverlay !== undefined ? { declaredOverlay } : {}) };
+    const scannedScale = scanned.prop.scale;
+    const declaredScale = typeof scannedScale === 'string' ? scannedScale : undefined;
+    const token: PineToken = { source, instanceId, ...(declaredOverlay !== undefined ? { declaredOverlay } : {}), ...(declaredScale !== undefined ? { declaredScale } : {}) };
     return { language: 'pine', inputs, ...(props.length > 0 ? { props } : {}), meta: { title, overlay }, reactsToViewport, token };
 }
 
@@ -212,6 +220,14 @@ export function pineCtxToModel(ctx: unknown, instanceId: string, prepared: Prepa
     if (overlay !== undefined) {
         model.overlay = overlay;
         model.paneHint = overlay ? 'price' : 'new';
+    }
+    // `scale = scale.none` puts the script on no price scale: none of its plots may stretch
+    // the pane's autoscale (a hidden plot of 158 beside prices near 6 squashed the candles
+    // flat). The values still read in the legend and the data window. A host's `scale` prop
+    // override sits on top of the declaration, like `overlay` above.
+    const scale = typeof props.scale === 'string' ? props.scale : (prepared.token as PineToken).declaredScale;
+    if (scale === 'none') {
+        model.series = model.series.map((s) => ({ ...s, display: { ...s.display, priceScale: false } }));
     }
     model.inputs = prepared.inputs;
     model.inputValues = { ...defaultsOf(prepared.inputs), ...inputs };
