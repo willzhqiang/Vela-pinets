@@ -509,7 +509,18 @@ export function syminfoForSymbol(market: ExecutionMarket, sym: string | undefine
     // the display fields from the PLAIN symbol (the modifier is a data-routing marker,
     // not part of the instrument's identity).
     const plain = sym ? sym.split(';')[0]! : sym;
-    return plain && plain !== market.symbol ? syminfoFor({ symbol: plain, timeframe: market.timeframe }) : syminfoFor(market);
+    // "The chart's own instrument" ignores the provider / exchange prefix: a chart on `us:SPY`
+    // asked for `SPY` (what `syminfo.tickerid` resolves to) is the SAME instrument and must keep
+    // its session syminfo — the synthesized fallback is UTC / `regular`, which loses the session
+    // close, so a daily bar would close 24 h after its open and the last intraday bar of a day
+    // would read the PREVIOUS day's higher-timeframe value.
+    return plain && !sameInstrument(plain, market.symbol) ? syminfoFor({ symbol: plain, timeframe: market.timeframe }) : syminfoFor(market);
+}
+
+/** Two symbol spellings name the same instrument when they agree after dropping a `PROVIDER:` / `EXCHANGE:` prefix. */
+function sameInstrument(a: string, b: string): boolean {
+    const bare = (s: string): string => s.replace(/^[^:]*:/, '').toUpperCase();
+    return a === b || bare(a) === bare(b);
 }
 
 /** Symbol info for execution: prefer the feed's, else synthesize from the ticker. */
