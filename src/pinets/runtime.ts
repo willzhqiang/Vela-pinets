@@ -180,7 +180,7 @@ export async function runPineStatic(opts: {
     const source = {
         getMarketData: (sym?: string, tf?: string, limit?: number, sDate?: number, eDate?: number) =>
             isChartSeries(sym, tf, market) ? Promise.resolve(klines) : secondaryKlines(fetchSeries, sym, tf, limit, sDate, eDate, syminfoForSymbol(market, sym)),
-        getSymbolInfo: async (sym?: string) => syminfoForSymbol(market, sym),
+        getSymbolInfo: async (sym?: string) => pineSyminfo(market, sym),
         ...footprintSurface(footprints, () => market.symbol, () => market.timeframe),
     };
     const pine = new PineTS(source as never, chartTickerOf(market), market.timeframe, klines.length);
@@ -417,7 +417,7 @@ export function makeLiveProvider(getBars: () => OHLCV[], getMarket: () => Execut
             lastKey = sig;
             return tail;
         },
-        getSymbolInfo: async (ticker) => syminfoForSymbol(getMarket(), ticker),
+        getSymbolInfo: async (ticker) => pineSyminfo(getMarket(), ticker),
     };
 }
 
@@ -515,6 +515,21 @@ export function syminfoForSymbol(market: ExecutionMarket, sym: string | undefine
     // close, so a daily bar would close 24 h after its open and the last intraday bar of a day
     // would read the PREVIOUS day's higher-timeframe value.
     return plain && !sameInstrument(plain, market.symbol) ? syminfoFor({ symbol: plain, timeframe: market.timeframe }) : syminfoFor(market);
+}
+
+/**
+ * The syminfo a SCRIPT sees. Pine's `syminfo.session` is the chart's session TYPE (`regular` /
+ * `extended`), while Vela's symbol info carries the regular HOURS there ("0930-1600"): on a
+ * session market the script gets the chart session (`ExecutionMarket.session`, default
+ * `regular`) and the hours move to `session_regular`, where PineTS's `session.ismarket` & co.
+ * read them. Continuous markets ('24x7', 'regular' fallbacks) pass through unchanged. The
+ * kline close times keep reading the hours from the raw symbol info ({@link sessionCloser}).
+ */
+export function pineSyminfo(market: ExecutionMarket, sym: string | undefined): Record<string, unknown> {
+    const si = syminfoForSymbol(market, sym);
+    if (sessionSpan(si.session) == null) return si;
+    const session = (market as ExecutionMarket & { session?: string }).session === 'extended' ? 'extended' : 'regular';
+    return { ...si, session, session_regular: si.session };
 }
 
 /** Two symbol spellings name the same instrument when they agree after dropping a `PROVIDER:` / `EXCHANGE:` prefix. */
